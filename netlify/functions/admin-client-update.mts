@@ -102,6 +102,46 @@ export default async function handler(req: Request): Promise<Response> {
       break;
     }
 
+    // Log a manual (historical) session — no chat transcript
+    case "log-manual-session": {
+      const sessionDate = data.date ? new Date(data.date).toISOString() : new Date().toISOString();
+
+      // Create a stub conversation row
+      const { data: conv, error: convError } = await supabase
+        .from("conversations")
+        .insert({
+          user_id: userId,
+          title: data.attachment_text,
+          attachment_text: data.attachment_text,
+          charge_before: data.charge_before ?? null,
+          charge_after: data.charge_after ?? null,
+          created_at: sessionDate,
+          updated_at: sessionDate,
+        })
+        .select()
+        .single();
+
+      if (convError) {
+        result = { error: convError.message };
+        break;
+      }
+
+      // Create the post-session form entry so it counts as complete
+      const { error: formError } = await supabase
+        .from("post_session_forms")
+        .insert({
+          conversation_id: conv.id,
+          user_id: userId,
+          charge_before: data.charge_before ?? null,
+          charge_after: data.charge_after ?? null,
+          insights: data.insights || null,
+          completed_at: sessionDate,
+        });
+
+      result = { conversation: conv, error: formError?.message };
+      break;
+    }
+
     default:
       return new Response(JSON.stringify({ error: "Unknown action" }), {
         status: 400,

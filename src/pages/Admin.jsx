@@ -267,6 +267,84 @@ function ClientsView({ onSelectClient, onSignOut }) {
   )
 }
 
+// ── Log Session Form ──────────────────────────────────────────
+function LogSessionForm({ userId, onLogged }) {
+  const today = new Date().toISOString().split('T')[0]
+  const [attachment, setAttachment] = useState('')
+  const [date, setDate] = useState(today)
+  const [before, setBefore] = useState('')
+  const [after, setAfter] = useState('')
+  const [insights, setInsights] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState(null)
+
+  const handleSubmit = async () => {
+    if (!attachment.trim()) return
+    setSaving(true)
+    setError(null)
+    const res = await adminFetch('/api/admin-client-update', {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'log-manual-session',
+        userId,
+        data: {
+          attachment_text: attachment.trim(),
+          date,
+          charge_before: before !== '' ? parseInt(before) : null,
+          charge_after: after !== '' ? parseInt(after) : null,
+          insights: insights.trim() || null,
+        },
+      }),
+    })
+    const result = await res.json()
+    if (result.error) { setError(result.error); setSaving(false); return }
+    onLogged(result.conversation)
+    setAttachment(''); setDate(today); setBefore(''); setAfter(''); setInsights('')
+    setSaved(true); setSaving(false)
+    setTimeout(() => setSaved(false), 2500)
+  }
+
+  return (
+    <div>
+      <p style={{ fontSize: 13, color: '#AAA', fontWeight: 300, marginBottom: 20, lineHeight: 1.6 }}>
+        Log a completed session that happened outside this app. It counts toward metrics and appears in the client's session log.
+      </p>
+      {error && <div className="adm-err" style={{ marginBottom: 16 }}>{error}</div>}
+      <div className="profile-grid" style={{ marginBottom: 16 }}>
+        <div className="profile-field" style={{ gridColumn: '1 / -1' }}>
+          <label className="profile-label">Attachment worked on</label>
+          <input className="profile-input" placeholder="e.g. Fear of being seen as unprepared" value={attachment} onChange={e => setAttachment(e.target.value)} />
+        </div>
+        <div className="profile-field">
+          <label className="profile-label">Session date</label>
+          <input type="date" className="profile-input" value={date} onChange={e => setDate(e.target.value)} />
+        </div>
+        <div className="profile-field" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <div>
+            <label className="profile-label">Charge before</label>
+            <input type="number" min={0} max={10} className="profile-input" placeholder="0–10" value={before} onChange={e => setBefore(e.target.value)} />
+          </div>
+          <div>
+            <label className="profile-label">Charge after</label>
+            <input type="number" min={0} max={10} className="profile-input" placeholder="0–10" value={after} onChange={e => setAfter(e.target.value)} />
+          </div>
+        </div>
+        <div className="profile-field" style={{ gridColumn: '1 / -1' }}>
+          <label className="profile-label">Insight <span style={{ color: '#CCC', fontWeight: 300, textTransform: 'none', letterSpacing: 0 }}>(optional)</span></label>
+          <input className="profile-input" placeholder="Any insight from this session worth recording" value={insights} onChange={e => setInsights(e.target.value)} />
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <button className="save-btn" onClick={handleSubmit} disabled={saving || !attachment.trim()}>
+          {saving ? 'Logging…' : 'Log session'}
+        </button>
+        {saved && <span className="save-confirm">✓ Session logged</span>}
+      </div>
+    </div>
+  )
+}
+
 // ── Client Detail View ────────────────────────────────────────
 function ClientDetailView({ clientId, onBack }) {
   const [data, setData] = useState(null)
@@ -537,6 +615,27 @@ function ClientDetailView({ clientId, onBack }) {
               <button className="del-btn" onClick={() => deleteLifeNote(note.id)} title="Delete">×</button>
             </div>
           ))}
+        </div>
+
+        <hr className="rule" />
+
+        {/* Log past session */}
+        <div className="detail-section">
+          <div className="detail-section-title">Log Past Session</div>
+          <LogSessionForm userId={clientId} onLogged={(conv) => {
+            // Optimistically add to the conversation list
+            const newConv = {
+              ...conv,
+              session_number: data.conversations.length + 1,
+              is_complete: true,
+              form: {
+                charge_before: conv.charge_before,
+                charge_after: conv.charge_after,
+                insights: conv.insights,
+              },
+            }
+            setData(prev => ({ ...prev, conversations: [...prev.conversations, newConv] }))
+          }} />
         </div>
 
         <hr className="rule" />
