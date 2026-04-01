@@ -42,6 +42,7 @@ function extractCharges(messages) {
 }
 
 const styles = `
+  html, body { overflow: hidden; height: 100%; }
   .chat-wrap {
     height: 100vh; height: 100dvh;
     display: flex; flex-direction: column;
@@ -134,12 +135,19 @@ const styles = `
   }
 
   /* Post-session form overlay */
+  .form-backdrop {
+    display: none; position: fixed; inset: 0; z-index: 49;
+    background: rgba(0,0,0,.25);
+  }
+  .form-backdrop.visible { display: block; }
+
   .form-overlay {
-    position: absolute; bottom: 0; left: 0; right: 0; z-index: 50;
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 50;
     background: #fff; border-top: 2px solid #1A1A1A;
-    box-shadow: 0 -8px 32px rgba(0,0,0,.08);
+    box-shadow: 0 -8px 40px rgba(0,0,0,.12);
     transform: translateY(100%); transition: transform .35s cubic-bezier(.16,1,.3,1);
     padding: 28px 24px 32px; padding-bottom: calc(32px + env(safe-area-inset-bottom));
+    max-height: 90vh; overflow-y: auto;
   }
   .form-overlay.visible { transform: translateY(0); }
   @media(min-width:600px){ .form-overlay { padding: 28px 48px 32px; padding-bottom: calc(32px + env(safe-area-inset-bottom)); } }
@@ -458,6 +466,7 @@ export default function Chat({ session }) {
         </div>
 
         {/* Post-session form slide-up */}
+        <div className={`form-backdrop ${showForm ? 'visible' : ''}`} onClick={() => setShowForm(false)} />
         <div className={`form-overlay ${showForm ? 'visible' : ''}`}>
           <div className="form-inner">
             <div className="form-headline">Session complete.</div>
