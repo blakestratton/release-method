@@ -74,6 +74,22 @@ const styles = `
   }
   .session-num-label { font-size: 11px; color: #CCC; font-weight: 300; margin-top: 1px; }
 
+  .title-display { display: flex; align-items: center; justify-content: center; gap: 6px; }
+  .title-edit-btn {
+    background: none; border: none; cursor: pointer; padding: 2px;
+    color: transparent; transition: color .15s; flex-shrink: 0;
+    display: flex; align-items: center; line-height: 1;
+  }
+  .title-display:hover .title-edit-btn { color: #CCC; }
+  .title-edit-btn:hover { color: #A0785A !important; }
+
+  .title-edit-input {
+    font-family: 'DM Serif Display',serif; font-size: 16px; font-weight: 400;
+    color: #1A1A1A; text-align: center; background: #FAF9F7;
+    border: 1px solid #A0785A; border-radius: 3px;
+    padding: 3px 8px; outline: none; width: 240px; max-width: 100%;
+  }
+
   /* Messages */
   .messages-scroll { flex: 1; overflow-y: auto; padding: 32px 0 16px; -webkit-overflow-scrolling: touch; }
   .messages-inner { width: 100%; max-width: 640px; margin: 0 auto; padding: 0 20px; display: flex; flex-direction: column; }
@@ -213,6 +229,11 @@ export default function Chat({ session }) {
   const [submittingForm, setSubmittingForm] = useState(false)
   const [formSubmitted, setFormSubmitted] = useState(false)
 
+  // Title editing state
+  const [editingTitle, setEditingTitle] = useState(false)
+  const [editTitleValue, setEditTitleValue] = useState('')
+  const titleInputRef = useRef(null)
+
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
 
@@ -253,6 +274,27 @@ export default function Chat({ session }) {
   const autoResize = (el) => {
     el.style.height = 'auto'
     el.style.height = Math.min(el.scrollHeight, 160) + 'px'
+  }
+
+  const startEditingTitle = () => {
+    setEditTitleValue(conversation?.title || conversation?.attachment_text || '')
+    setEditingTitle(true)
+    setTimeout(() => titleInputRef.current?.focus(), 50)
+  }
+
+  const saveTitle = async () => {
+    const newTitle = editTitleValue.trim()
+    setEditingTitle(false)
+    if (!newTitle || newTitle === (conversation?.title || '')) return
+    await supabase.from('conversations').update({
+      title: newTitle,
+      attachment_text: newTitle,
+    }).eq('id', id)
+    setConversation(prev => ({ ...prev, title: newTitle, attachment_text: newTitle }))
+  }
+
+  const cancelEditTitle = () => {
+    setEditingTitle(false)
   }
 
   const triggerPostSessionForm = (allMessages) => {
@@ -391,9 +433,32 @@ export default function Chat({ session }) {
           <button className="back-btn" onClick={() => navigate('/')}>‹ Dashboard</button>
           <div className="chat-header-title">
             <div className="chat-header-eyebrow">Release Method</div>
-            <div className="chat-header-name" title={sessionTitle}>
-              {loading ? '—' : sessionTitle}
-            </div>
+            {editingTitle ? (
+              <input
+                ref={titleInputRef}
+                className="title-edit-input"
+                value={editTitleValue}
+                onChange={e => setEditTitleValue(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') saveTitle()
+                  if (e.key === 'Escape') cancelEditTitle()
+                }}
+                onBlur={saveTitle}
+              />
+            ) : (
+              <div className="title-display">
+                <div className="chat-header-name" title={sessionTitle}>
+                  {loading ? '—' : sessionTitle}
+                </div>
+                {!loading && messages.length > 0 && (
+                  <button className="title-edit-btn" onClick={startEditingTitle} title="Edit title">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
+                    </svg>
+                  </button>
+                )}
+              </div>
+            )}
             {sessionNumber && (
               <div className="session-num-label">Session {sessionNumber}</div>
             )}
