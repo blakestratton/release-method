@@ -126,13 +126,13 @@ const S = `
 
   /* Session log */
   .session-table-header {
-    display: grid; grid-template-columns: 32px 1fr 80px 80px 44px;
+    display: grid; grid-template-columns: 32px 1fr 80px 80px 44px 28px;
     gap: 12px; padding-bottom: 10px; border-bottom: 2px solid #1A1A1A;
   }
   .col-label { font-size: 10px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: #AAA; }
   .session-row-wrap {}
   .session-row {
-    display: grid; grid-template-columns: 32px 1fr 80px 80px 44px;
+    display: grid; grid-template-columns: 32px 1fr 80px 80px 44px 28px;
     gap: 12px; align-items: center; padding: 13px 0;
     border-bottom: 1px solid #F2EFEB; cursor: pointer;
     transition: all .1s; border-radius: 2px;
@@ -156,6 +156,19 @@ const S = `
     font-style: italic; line-height: 1.6;
   }
   .note-label { font-style: normal; font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: #A0785A; margin-bottom: 5px; }
+
+  /* Delete button */
+  .session-delete-btn {
+    background: none; border: none; cursor: pointer;
+    color: transparent; font-size: 15px; font-weight: 400;
+    width: 28px; height: 28px; display: flex; align-items: center;
+    justify-content: center; border-radius: 3px;
+    transition: color .15s, background .15s;
+    font-family: 'DM Sans', sans-serif;
+    flex-shrink: 0;
+  }
+  .session-row:hover .session-delete-btn { color: #CCC; }
+  .session-delete-btn:hover { color: #C0392B !important; background: #FDF2F2; }
 
   /* Inventory */
   .inventory-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
@@ -230,6 +243,7 @@ export default function Dashboard({ session }) {
   const [newItem, setNewItem] = useState('')
   const [addingItem, setAddingItem] = useState(false)
   const [removingId, setRemovingId] = useState(null)
+  const [deletingId, setDeletingId] = useState(null)
   const navigate = useNavigate()
 
   useEffect(() => { loadAll() }, [])
@@ -243,9 +257,39 @@ export default function Dashboard({ session }) {
       supabase.from('attachment_inventory').select('*').order('created_at', { ascending: true }),
       supabase.from('life_notes').select('*').order('created_at', { ascending: false }),
     ])
+
+    const allConvs = convsRes.data || []
+    const allForms = formsRes.data || []
+
+    // Auto-cleanup: remove blank sessions (no title, no attachment_text, no form, no messages)
+    const formConvIds = new Set(allForms.map(f => f.conversation_id))
+    const blanks = allConvs.filter(c => !c.title && !c.attachment_text && !formConvIds.has(c.id))
+    let cleaned = false
+
+    for (const blank of blanks) {
+      const { count } = await supabase
+        .from('messages')
+        .select('*', { count: 'exact', head: true })
+        .eq('conversation_id', blank.id)
+      if (count === 0) {
+        await supabase.from('conversations').delete().eq('id', blank.id)
+        cleaned = true
+      }
+    }
+
+    if (cleaned) {
+      // Re-fetch conversations after cleanup
+      const { data: freshConvs } = await supabase
+        .from('conversations')
+        .select('*')
+        .order('created_at', { ascending: true })
+      setConversations(freshConvs || [])
+    } else {
+      setConversations(allConvs)
+    }
+
     setProfile(profileRes.data)
-    setConversations(convsRes.data || [])
-    setForms(formsRes.data || [])
+    setForms(allForms)
     setInventory(invRes.data || [])
     setLifeNotes(notesRes.data || [])
     setLoading(false)
@@ -260,6 +304,19 @@ export default function Dashboard({ session }) {
       .single()
     if (!error && data) navigate(`/chat/${data.id}`)
     else setCreating(false)
+  }
+
+  const deleteSession = async (e, convId) => {
+    e.stopPropagation()
+    if (!window.confirm('Delete this session? This cannot be undone.')) return
+    setDeletingId(convId)
+    // Delete related rows first, then the conversation
+    await supabase.from('messages').delete().eq('conversation_id', convId)
+    await supabase.from('post_session_forms').delete().eq('conversation_id', convId)
+    await supabase.from('conversations').delete().eq('id', convId)
+    setConversations(prev => prev.filter(c => c.id !== convId))
+    setForms(prev => prev.filter(f => f.conversation_id !== convId))
+    setDeletingId(null)
   }
 
   const handleSignOut = async () => {
@@ -490,8 +547,8 @@ export default function Dashboard({ session }) {
             ) : (
               <>
                 <div className="session-table-header">
-                  {['#', 'Attachment Released', 'Before', 'After', 'Δ'].map((h, i) => (
-                    <div key={i} className="col-label" style={{ textAlign: i > 1 ? 'center' : 'left' }}>{h}</div>
+                  {['#', 'Attachment Released', 'Before', 'After', 'Δ', ''].map((h, i) => (
+                    <div key={i} className="col-label" style={{ textAlign: i > 1 && i < 5 ? 'center' : 'left' }}>{h}</div>
                   ))}
                 </div>
                 {[...conversations].reverse().map((conv, idx) => {
@@ -500,8 +557,9 @@ export default function Dashboard({ session }) {
                   const isComplete = !!form
                   const isInProgress = !isComplete && conv.title
                   const delta = form ? Math.max(0, (form.charge_before || 0) - (form.charge_after || 0)) : null
+                  const isDeleting = deletingId === conv.id
                   return (
-                    <div key={conv.id} className="session-row-wrap">
+                    <div key={conv.id} className="session-row-wrap" style={{ opacity: isDeleting ? 0.3 : 1, transition: 'opacity .2s' }}>
                       <div
                         className="session-row"
                         onClick={() => isInProgress ? navigate(`/chat/${conv.id}`) : setExpandedSession(expandedSession === conv.id ? null : conv.id)}
@@ -538,6 +596,12 @@ export default function Dashboard({ session }) {
                         <div className="session-delta">
                           {delta != null ? `+${delta}` : '—'}
                         </div>
+                        <button
+                          className="session-delete-btn"
+                          onClick={(e) => deleteSession(e, conv.id)}
+                          title="Delete session"
+                          disabled={isDeleting}
+                        >×</button>
                       </div>
                       {expandedSession === conv.id && form?.insights && (
                         <div className="note-expand">

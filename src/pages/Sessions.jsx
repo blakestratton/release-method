@@ -142,6 +142,18 @@ const styles = `
     flex-shrink: 0;
   }
 
+  .session-delete-btn {
+    background: none; border: none; cursor: pointer;
+    color: transparent; font-size: 15px; font-weight: 400;
+    width: 28px; height: 28px; display: flex; align-items: center;
+    justify-content: center; border-radius: 3px;
+    transition: color .15s, background .15s;
+    font-family: 'DM Sans', sans-serif;
+    flex-shrink: 0;
+  }
+  .session-item:hover .session-delete-btn { color: #CCC; }
+  .session-delete-btn:hover { color: #C0392B !important; background: #FDF2F2; }
+
   .sessions-empty {
     padding: 48px 0 32px;
     text-align: center;
@@ -180,6 +192,7 @@ function formatDate(iso) {
 export default function Sessions({ session }) {
   const [conversations, setConversations] = useState(null)
   const [creating, setCreating] = useState(false)
+  const [deletingId, setDeletingId] = useState(null)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -189,10 +202,37 @@ export default function Sessions({ session }) {
   const loadConversations = async () => {
     const { data, error } = await supabase
       .from('conversations')
-      .select('id, title, created_at, updated_at')
+      .select('id, title, attachment_text, created_at, updated_at')
       .order('updated_at', { ascending: false })
 
-    if (!error) setConversations(data)
+    if (error) return
+
+    // Auto-cleanup: remove blank sessions (no title, no attachment_text, no messages)
+    const formRes = await supabase.from('post_session_forms').select('conversation_id')
+    const formConvIds = new Set((formRes.data || []).map(f => f.conversation_id))
+    const blanks = data.filter(c => !c.title && !c.attachment_text && !formConvIds.has(c.id))
+    let cleaned = false
+
+    for (const blank of blanks) {
+      const { count } = await supabase
+        .from('messages')
+        .select('*', { count: 'exact', head: true })
+        .eq('conversation_id', blank.id)
+      if (count === 0) {
+        await supabase.from('conversations').delete().eq('id', blank.id)
+        cleaned = true
+      }
+    }
+
+    if (cleaned) {
+      const { data: freshData } = await supabase
+        .from('conversations')
+        .select('id, title, attachment_text, created_at, updated_at')
+        .order('updated_at', { ascending: false })
+      setConversations(freshData || [])
+    } else {
+      setConversations(data)
+    }
   }
 
   const startNewSession = async () => {
@@ -212,6 +252,17 @@ export default function Sessions({ session }) {
       console.error(error)
       setCreating(false)
     }
+  }
+
+  const deleteSession = async (e, convId) => {
+    e.stopPropagation()
+    if (!window.confirm('Delete this session? This cannot be undone.')) return
+    setDeletingId(convId)
+    await supabase.from('messages').delete().eq('conversation_id', convId)
+    await supabase.from('post_session_forms').delete().eq('conversation_id', convId)
+    await supabase.from('conversations').delete().eq('id', convId)
+    setConversations(prev => prev.filter(c => c.id !== convId))
+    setDeletingId(null)
   }
 
   const handleSignOut = async () => {
@@ -259,13 +310,20 @@ export default function Sessions({ session }) {
                   key={c.id}
                   className="session-item"
                   onClick={() => navigate(`/chat/${c.id}`)}
+                  style={{ opacity: deletingId === c.id ? 0.3 : 1, transition: 'opacity .2s' }}
                 >
-                  <div>
+                  <div style={{ flex: 1 }}>
                     <div className="session-title">
                       {c.title || <span style={{ color: '#CCC', fontWeight: 300 }}>Untitled session</span>}
                     </div>
                     <div className="session-date">{formatDate(c.updated_at)}</div>
                   </div>
+                  <button
+                    className="session-delete-btn"
+                    onClick={(e) => deleteSession(e, c.id)}
+                    title="Delete session"
+                    disabled={deletingId === c.id}
+                  >×</button>
                   <div className="session-arrow">›</div>
                 </div>
               ))}
