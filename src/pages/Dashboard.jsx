@@ -170,6 +170,20 @@ const S = `
   .session-row:hover .session-delete-btn { color: #CCC; }
   .session-delete-btn:hover { color: #C0392B !important; background: #FDF2F2; }
 
+  .session-title-edit-btn {
+    background: none; border: none; cursor: pointer; padding: 2px;
+    color: transparent; transition: color .15s; flex-shrink: 0;
+    display: inline-flex; align-items: center; margin-left: 5px; vertical-align: middle;
+  }
+  .session-row:hover .session-title-edit-btn { color: #CCC; }
+  .session-title-edit-btn:hover { color: #A0785A !important; }
+
+  .session-title-input {
+    font-family: 'DM Sans',sans-serif; font-size: 14px; font-weight: 400;
+    color: #1A1A1A; background: #fff; border: 1px solid #A0785A;
+    border-radius: 3px; padding: 4px 8px; outline: none; width: 100%;
+  }
+
   /* Inventory */
   .inventory-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
   @media(max-width:600px){ .inventory-grid { grid-template-columns: 1fr; } }
@@ -244,6 +258,8 @@ export default function Dashboard({ session }) {
   const [addingItem, setAddingItem] = useState(false)
   const [removingId, setRemovingId] = useState(null)
   const [deletingId, setDeletingId] = useState(null)
+  const [editingTitleId, setEditingTitleId] = useState(null)
+  const [editTitleValue, setEditTitleValue] = useState('')
   const navigate = useNavigate()
 
   useEffect(() => { loadAll() }, [])
@@ -317,6 +333,25 @@ export default function Dashboard({ session }) {
     setConversations(prev => prev.filter(c => c.id !== convId))
     setForms(prev => prev.filter(f => f.conversation_id !== convId))
     setDeletingId(null)
+  }
+
+  const startEditTitle = (e, conv) => {
+    e.stopPropagation()
+    setEditTitleValue(conv.attachment_text || conv.title || '')
+    setEditingTitleId(conv.id)
+  }
+
+  const saveSessionTitle = async (convId) => {
+    const newTitle = editTitleValue.trim()
+    setEditingTitleId(null)
+    if (!newTitle) return
+    await supabase.from('conversations').update({
+      title: newTitle,
+      attachment_text: newTitle,
+    }).eq('id', convId)
+    setConversations(prev => prev.map(c =>
+      c.id === convId ? { ...c, title: newTitle, attachment_text: newTitle } : c
+    ))
   }
 
   const handleSignOut = async () => {
@@ -566,9 +601,29 @@ export default function Dashboard({ session }) {
                       >
                         <div className="session-num">{sessionNum}</div>
                         <div>
-                          <div className="session-attachment">
-                            {conv.attachment_text || conv.title || <span style={{ color: '#CCC', fontWeight: 300 }}>Untitled</span>}
-                          </div>
+                          {editingTitleId === conv.id ? (
+                            <input
+                              className="session-title-input"
+                              autoFocus
+                              value={editTitleValue}
+                              onChange={e => setEditTitleValue(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') saveSessionTitle(conv.id)
+                                if (e.key === 'Escape') setEditingTitleId(null)
+                              }}
+                              onBlur={() => saveSessionTitle(conv.id)}
+                              onClick={e => e.stopPropagation()}
+                            />
+                          ) : (
+                            <div className="session-attachment">
+                              {conv.attachment_text || conv.title || <span style={{ color: '#CCC', fontWeight: 300 }}>Untitled</span>}
+                              <button className="session-title-edit-btn" onClick={(e) => startEditTitle(e, conv)} title="Edit title">
+                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
+                                </svg>
+                              </button>
+                            </div>
+                          )}
                           <div className="session-date">{formatDate(conv.created_at)}</div>
                           {isInProgress && (
                             <div className="in-progress-badge">
