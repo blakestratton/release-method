@@ -156,6 +156,18 @@ const S = `
   .rule { border: none; border-top: 1px solid #ECEAE6; margin: 32px 0; }
   .empty-state { padding: 16px 0; font-size: 13px; color: #CCC; font-weight: 300; }
 
+  /* Weekly overview */
+  .weekly-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 0; }
+  @media(max-width:500px){ .weekly-grid { grid-template-columns: 1fr; } }
+  .weekly-card { background: #fff; border: 1px solid #ECEAE6; border-radius: 3px; padding: 20px 22px 16px; }
+  .weekly-label { font-size: 10px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: #AAA; margin-bottom: 6px; }
+  .weekly-num { font-family: 'DM Serif Display',serif; font-size: 40px; font-weight: 400; line-height: 1; letter-spacing: -1px; color: #1A1A1A; }
+  .weekly-sub { font-size: 12px; color: #BBB; margin-top: 4px; font-weight: 300; }
+  .weekly-status-badge {
+    display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px;
+    border-radius: 100px; font-size: 12px; font-weight: 500; margin-top: 8px;
+  }
+
   /* Session log (read-only in admin) */
   .adm-session-row { display: grid; grid-template-columns: 32px 1fr 60px 60px 44px; gap: 12px; align-items: center; padding: 11px 0; border-bottom: 1px solid #F2EFEB; }
   .adm-session-row:last-child { border-bottom: none; }
@@ -530,6 +542,59 @@ function ClientDetailView({ clientId, onBack }) {
             {profileSaved && <span className="save-confirm">✓ Saved</span>}
           </div>
         </div>
+
+        <hr className="rule" />
+
+        {/* Weekly Activity Overview */}
+        {(() => {
+          const weekAgo = new Date()
+          weekAgo.setDate(weekAgo.getDate() - 7)
+          const weekConvs = data.conversations.filter(c => new Date(c.created_at) > weekAgo)
+          const weekCompleted = weekConvs.filter(c => c.form?.charge_before != null && c.form?.charge_after != null)
+          const weekPressure = weekCompleted.reduce((sum, c) => {
+            return sum + Math.max(0, (c.form.charge_before || 0) - (c.form.charge_after || 0))
+          }, 0)
+          const weekCount = weekConvs.length
+          const statusConfig = weekCount === 0
+            ? { label: 'No sessions this week', color: '#C0392B', bg: '#FDF2F2', dot: '#E05454' }
+            : weekCount === 1
+              ? { label: '1 session this week', color: '#9A6F1A', bg: '#FDFAF2', dot: '#D4A843' }
+              : { label: `${weekCount} sessions this week`, color: '#1E7A52', bg: '#F2FDF8', dot: '#3BAF7A' }
+
+          // All-time metrics for context
+          const allCompleted = data.conversations.filter(c => c.form?.charge_before != null && c.form?.charge_after != null)
+          const totalPressure = allCompleted.reduce((sum, c) => {
+            return sum + Math.max(0, (c.form.charge_before || 0) - (c.form.charge_after || 0))
+          }, 0)
+
+          return (
+            <div className="detail-section">
+              <div className="detail-section-title">Weekly Activity</div>
+              <div className="weekly-grid">
+                <div className="weekly-card">
+                  <div className="weekly-label">Sessions (7 days)</div>
+                  <div className="weekly-num">{weekCount}</div>
+                  <div className="weekly-sub">{allCompleted.length} completed all-time</div>
+                </div>
+                <div className="weekly-card">
+                  <div className="weekly-label">Pressure Released (7 days)</div>
+                  <div className="weekly-num">{weekPressure}</div>
+                  <div className="weekly-sub">{totalPressure} cumulative all-time</div>
+                </div>
+                <div className="weekly-card">
+                  <div className="weekly-label">Status</div>
+                  <div className="weekly-status-badge" style={{ background: statusConfig.bg, color: statusConfig.color, border: `1px solid ${statusConfig.dot}40` }}>
+                    <div style={{ width: 7, height: 7, borderRadius: '50%', background: statusConfig.dot, flexShrink: 0 }} />
+                    {statusConfig.label}
+                  </div>
+                  {data.profile?.next_coaching_call && (
+                    <div className="weekly-sub" style={{ marginTop: 10 }}>Next call: {formatDate(data.profile.next_coaching_call)}</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )
+        })()}
 
         <hr className="rule" />
 
