@@ -5,13 +5,37 @@ import { supabase } from '../lib/supabase'
 // Detect the phrase the facilitator uses to trigger the post-session form
 const FORM_TRIGGER = 'post-session form'
 
+// Step metadata for the progress bar
+const STEPS = [
+  { n: 1, label: 'Opening' },
+  { n: 2, label: 'Inversion' },
+  { n: 3, label: 'Judgment' },
+  { n: 4, label: 'Ownership' },
+  { n: 5, label: 'Power' },
+  { n: 6, label: 'Commitment' },
+]
+
+// Parse and strip a leading <step>N</step> tag from AI response text.
+// Returns { step: number|null, content: string }
+function parseStepTag(text) {
+  // Tag fully arrived
+  const match = text.match(/^<step>(\d)<\/step>\n?/)
+  if (match) {
+    return { step: parseInt(match[1]), content: text.slice(match[0].length) }
+  }
+  // Tag still streaming in — suppress display until it closes
+  if (text.startsWith('<step>') && !text.includes('</step>')) {
+    return { step: null, content: '' }
+  }
+  // No tag present
+  return { step: null, content: text }
+}
+
 // Extract charge ratings from the conversation transcript
 function extractCharges(messages) {
   let before = null
   let after = null
 
-  // Scan assistant messages in reverse for the closing delta statement
-  // e.g. "Started at 8, now at 3."
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
     if (msg.role === 'assistant') {
@@ -24,7 +48,6 @@ function extractCharges(messages) {
     }
   }
 
-  // Fallback: find the first single-digit user response (initial charge rating)
   if (before === null) {
     for (const msg of messages) {
       if (msg.role === 'user') {
@@ -39,6 +62,18 @@ function extractCharges(messages) {
   }
 
   return { before, after }
+}
+
+// Infer the highest step seen so far from stored messages
+function inferStepFromMessages(messages) {
+  let highest = 0
+  for (const msg of messages) {
+    if (msg.role === 'assistant') {
+      const { step } = parseStepTag(msg.content)
+      if (step && step > highest) highest = step
+    }
+  }
+  return highest
 }
 
 const styles = `
@@ -89,6 +124,55 @@ const styles = `
     border: 1px solid #A0785A; border-radius: 3px;
     padding: 3px 8px; outline: none; width: 240px; max-width: 100%;
   }
+
+  /* Progress bar */
+  .progress-bar {
+    background: #fff; border-bottom: 1px solid #ECEAE6;
+    padding: 10px 20px 12px; flex-shrink: 0;
+  }
+  @media(min-width:600px){ .progress-bar { padding: 10px 32px 12px; } }
+
+  .progress-track {
+    position: relative; max-width: 480px; margin: 0 auto;
+    display: flex; align-items: flex-start; justify-content: space-between;
+  }
+
+  .progress-line-bg {
+    position: absolute; top: 5px; left: 0; right: 0; height: 1px;
+    background: #ECEAE6; z-index: 0;
+  }
+  .progress-line-fill {
+    position: absolute; top: 5px; left: 0; height: 1px;
+    background: #1A1A1A; z-index: 1;
+    transition: width .4s cubic-bezier(.4,0,.2,1);
+  }
+
+  .progress-node {
+    position: relative; z-index: 2;
+    display: flex; flex-direction: column; align-items: center; gap: 5px;
+    cursor: default;
+  }
+  .progress-dot {
+    width: 11px; height: 11px; border-radius: 50%;
+    transition: background .3s, transform .3s;
+  }
+  .progress-node.future  .progress-dot { background: #E0DDD9; }
+  .progress-node.completed .progress-dot { background: #1A1A1A; }
+  .progress-node.active .progress-dot {
+    background: #A0785A;
+    transform: scale(1.2);
+    box-shadow: 0 0 0 3px rgba(160,120,90,.18);
+  }
+
+  .progress-label {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 8px; font-weight: 500; letter-spacing: .07em;
+    text-transform: uppercase; line-height: 1;
+    transition: color .3s;
+  }
+  .progress-node.future  .progress-label { color: #CCC; }
+  .progress-node.completed .progress-label { color: #AAA; }
+  .progress-node.active .progress-label { color: #A0785A; font-weight: 600; }
 
   /* Messages */
   .messages-scroll { flex: 1; overflow-y: auto; padding: 32px 0 16px; -webkit-overflow-scrolling: touch; }
@@ -221,6 +305,9 @@ export default function Chat({ session }) {
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
 
+  // Progress tracking
+  const [currentStep, setCurrentStep] = useState(0)
+
   // Post-session form state
   const [showForm, setShowForm] = useState(false)
   const [formBefore, setFormBefore] = useState('')
@@ -259,6 +346,9 @@ export default function Chat({ session }) {
     setConversation(convRes.data)
     const msgs = msgRes.data || []
     setMessages(msgs)
+
+    // Infer current step from stored messages
+    setCurrentStep(inferStepFromMessages(msgs))
 
     // Calculate session number
     const allConvs = allConvsRes.data || []
@@ -363,10 +453,14 @@ export default function Chat({ session }) {
         if (done) break
         const chunk = decoder.decode(value, { stream: true })
         fullContent += chunk
-        setStreamingContent(fullContent)
+
+        // Parse and strip the step tag; update progress bar live
+        const { step, content: displayContent } = parseStepTag(fullContent)
+        if (step !== null) setCurrentStep(step)
+        setStreamingContent(displayContent)
       }
 
-      // Save assistant message
+      // Save assistant message (raw, including step tag for reload inference)
       const { data: assistantMsg } = await supabase
         .from('messages')
         .insert({ conversation_id: id, role: 'assistant', content: fullContent })
@@ -396,7 +490,6 @@ export default function Chat({ session }) {
     const after = parseInt(formAfter)
     const attachmentText = conversation?.title || null
 
-    // Save post-session form
     await supabase.from('post_session_forms').insert({
       conversation_id: id,
       user_id: session.user.id,
@@ -405,7 +498,6 @@ export default function Chat({ session }) {
       insights: formInsights.trim() || null,
     })
 
-    // Update conversation with charge data and attachment text
     await supabase.from('conversations').update({
       charge_before: isNaN(before) ? null : before,
       charge_after: isNaN(after) ? null : after,
@@ -422,6 +514,9 @@ export default function Chat({ session }) {
   }
 
   const sessionTitle = conversation?.title || 'New session'
+
+  // Compute line fill width for progress bar
+  const lineFillPct = currentStep > 1 ? ((currentStep - 1) / (STEPS.length - 1)) * 100 : 0
 
   return (
     <>
@@ -466,6 +561,23 @@ export default function Chat({ session }) {
           <div style={{ width: 80, flexShrink: 0 }} />
         </header>
 
+        {/* Progress bar */}
+        <div className="progress-bar">
+          <div className="progress-track">
+            <div className="progress-line-bg" />
+            <div className="progress-line-fill" style={{ width: `${lineFillPct}%` }} />
+            {STEPS.map(({ n, label }) => {
+              const state = n < currentStep ? 'completed' : n === currentStep ? 'active' : 'future'
+              return (
+                <div key={n} className={`progress-node ${state}`}>
+                  <div className="progress-dot" />
+                  <div className="progress-label">{label}</div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
         {/* Messages */}
         <div className="messages-scroll">
           <div className="messages-inner">
@@ -488,7 +600,7 @@ export default function Chat({ session }) {
                   {msg.role === 'user' ? 'You' : 'Facilitator'}
                 </div>
                 <div className={`msg-content ${msg.role === 'user' ? 'msg-content-user' : 'msg-content-assistant'}`}>
-                  {msg.content}
+                  {parseStepTag(msg.content).content}
                 </div>
               </div>
             ))}
